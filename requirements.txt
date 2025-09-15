@@ -37,7 +37,6 @@ MarkupSafe==3.0.2
 matplotlib==3.10.6
 mdit-py-plugins==0.5.0
 mdurl==0.1.2
-MetaTrader5==5.0.5200
 multidict==6.6.4
 multitasking==0.0.12
 narwhals==2.2.0
@@ -92,3 +91,4 @@ wheel==0.45.1
 yarl==1.20.1
 yfinance==0.2.65
 streamlit-autorefresh
+
