@@ -9,6 +9,7 @@ import pytz
 import plotly.express as px
 import pandas as pd
 from dateutil import parser
+import time
 
 # -----------------------
 # Page Config & Header
@@ -23,7 +24,7 @@ st.markdown("<p style='text-align: center; font-style: italic; color: orange;'>â
 st.sidebar.header("Controls")
 slow_refresh = st.sidebar.number_input("News refresh interval (seconds)", 30, 600, 60)
 # Refresh interval (seconds)
-REFRESH_INTERVAL = slow_refresh  
+REFRESH_INTERVAL = slow_refresh*1000  
 
 # Initialize timestamp in session_state
 if "last_refresh" not in st.session_state:
@@ -348,4 +349,5 @@ with r1c3:
         time_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
         lines.append(f"[{time_str}] <a href='{it['link']}' target='_blank'>{it['text']}</a>")
     st.markdown("<div class='small-terminal'>" + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
+
 
