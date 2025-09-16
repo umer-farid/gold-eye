@@ -182,6 +182,7 @@ st.title("💻 Gold Eye - Bloomberg Style Terminals")
 
 col1, col2 = st.columns([2, 2])
 
+# --- News Terminal ---
 with col1:
     st.markdown('<div class="terminal-box"><div class="terminal-title">📰 Terminal News</div>', unsafe_allow_html=True)
     feed_data = fetch_feeds()
@@ -210,21 +211,25 @@ with col1:
     st.markdown("**📊 Sentiment Heatmap**")
     if all_news:
         df = pd.DataFrame(all_news)
-        impact_counts = df.groupby(["impact", "sentiment"]).size().reset_index(name="count")
-        fig = px.density_heatmap(
-            impact_counts,
-            x="impact",
-            y="sentiment",
-            z="count",
-            text_auto=True,
-            color_continuous_scale="Viridis",
-            template="plotly_dark"
-        )
-        st.plotly_chart(fig, use_container_width=True)
+        if not df.empty and "impact" in df and "sentiment" in df:
+            impact_counts = df.groupby(["impact", "sentiment"]).size().reset_index(name="count")
+            fig = px.density_heatmap(
+                impact_counts,
+                x="impact",
+                y="sentiment",
+                z="count",
+                text_auto=True,
+                color_continuous_scale="Viridis",
+                template="plotly_dark"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.warning("No sentiment data available.")
     else:
-        st.warning("No data available to plot heatmap.")
+        st.warning("No news data available.")
     st.markdown("</div>", unsafe_allow_html=True)
 
+# --- Volatility Terminal ---
 with col2:
     st.markdown('<div class="terminal-box"><div class="terminal-title">📉 Volatility Terminal</div>', unsafe_allow_html=True)
     vol_cols = st.columns(2)
@@ -234,7 +239,7 @@ with col2:
         if not df.empty:
             with vol_cols[idx % 2]:
                 st.markdown(f"**{name}**")
-                fig = px.line(df, y="Volatility", template="plotly_dark")
+                fig = px.line(df, x=df.index, y="Volatility", template="plotly_dark")
                 st.plotly_chart(fig, use_container_width=True, height=200)
                 st.metric("Current Vol", f"{df['Volatility'].iloc[-1]:.2%}")
         else:
