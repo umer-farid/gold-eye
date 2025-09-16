@@ -1,4 +1,4 @@
-# gold_eye_terminal_news.py (patched with Market Interpretation)
+# gold_eye_terminal_news.py (rebuilt with styled trader-friendly notes)
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -49,6 +49,31 @@ st.markdown(
     }
     a { color: #76f1c0; }
     .streamlit-expanderHeader { color: #e6e600 !important; }
+
+    /* --- Trader Notes Styling --- */
+    .note-bullish {
+        background-color: #004d00;
+        color: #00ff66;
+        padding: 3px 6px;
+        border-radius: 4px;
+        margin-right: 4px;
+        display: inline-block;
+    }
+    .note-bearish {
+        background-color: #4d0000;
+        color: #ff6666;
+        padding: 3px 6px;
+        border-radius: 4px;
+        margin-right: 4px;
+        display: inline-block;
+    }
+    .note-neutral {
+        background-color: #333300;
+        color: #ffff66;
+        padding: 3px 6px;
+        border-radius: 4px;
+        display: inline-block;
+    }
     </style>
     """,
     unsafe_allow_html=True,
@@ -201,29 +226,53 @@ def fetch_volatility(ticker: str) -> pd.DataFrame:
         logging.error(f"Volatility fetch failed for {ticker}: {e}")
         return pd.DataFrame()
 
-# --- Trader-friendly Interpretation ---
+# --- Trader-friendly Interpretation with Styling ---
 def interpret_market(asset: str, latest_value: float) -> list[str]:
     notes = []
     if asset == "US 10Y Yield":
         if latest_value < 0.02:
-            notes = ["🟢 Bullish Gold", "🔴 Bearish USD", "🟢 Supportive Stocks"]
+            notes = [
+                '<span class="note-bullish">🟢 Bullish Gold</span>',
+                '<span class="note-bearish">🔴 Bearish USD</span>',
+                '<span class="note-bullish">🟢 Supportive Stocks</span>',
+            ]
         elif latest_value > 0.04:
-            notes = ["🔴 Bearish Gold", "🟢 Bullish USD", "🔴 Risk-Off Stocks"]
+            notes = [
+                '<span class="note-bearish">🔴 Bearish Gold</span>',
+                '<span class="note-bullish">🟢 Bullish USD</span>',
+                '<span class="note-bearish">🔴 Risk-Off Stocks</span>',
+            ]
         else:
-            notes = ["⚖️ Neutral across markets"]
+            notes = ['<span class="note-neutral">⚖️ Neutral across markets</span>']
     elif asset == "US Dollar Index":
         if latest_value > 105:
-            notes = ["🔴 Bearish Gold", "🟢 Bullish USD", "🔴 Weighs on Stocks"]
+            notes = [
+                '<span class="note-bearish">🔴 Bearish Gold</span>',
+                '<span class="note-bullish">🟢 Bullish USD</span>',
+                '<span class="note-bearish">🔴 Weighs on Stocks</span>',
+            ]
         elif latest_value < 100:
-            notes = ["🟢 Bullish Gold", "🔴 Weak USD", "🟢 Supportive Stocks"]
+            notes = [
+                '<span class="note-bullish">🟢 Bullish Gold</span>',
+                '<span class="note-bearish">🔴 Weak USD</span>',
+                '<span class="note-bullish">🟢 Supportive Stocks</span>',
+            ]
         else:
-            notes = ["⚖️ Range-bound impact"]
+            notes = ['<span class="note-neutral">⚖️ Range-bound impact</span>']
     elif asset == "Gold Futures":
-        notes = ["🟢 Rising Gold supports bulls"] if latest_value > 0 else ["🔴 Falling Gold pressures bulls"]
+        notes = [
+            '<span class="note-bullish">🟢 Rising Gold supports bulls</span>'
+            if latest_value > 0
+            else '<span class="note-bearish">🔴 Falling Gold pressures bulls</span>'
+        ]
     elif asset == "S&P 500":
-        notes = ["🟢 Bullish Stocks = Risk-On, 🔴 Bearish Gold"] if latest_value > 0 else ["🔴 Bearish Stocks = Risk-Off, 🟢 Bullish Gold"]
+        notes = [
+            '<span class="note-bullish">🟢 Bullish Stocks = Risk-On, 🔴 Bearish Gold</span>'
+            if latest_value > 0
+            else '<span class="note-bearish">🔴 Bearish Stocks = Risk-Off, 🟢 Bullish Gold</span>'
+        ]
     else:
-        notes = ["ℹ️ No bias rules defined"]
+        notes = ['<span class="note-neutral">ℹ️ No bias rules defined</span>']
     return notes
 
 # --- Streamlit UI ---
@@ -297,10 +346,10 @@ with col2:
                     st.plotly_chart(fig, use_container_width=True, height=200)
                     latest_vol = df_vol["Volatility"].iloc[-1]
                     st.metric("Current Vol", f"{latest_vol:.2%}")
-                    # 🔹 Trader-friendly interpretation
+                    # 🔹 Trader-friendly styled interpretation
                     notes = interpret_market(name, latest_vol)
                     for n in notes:
-                        st.caption(n)
+                        st.markdown(n, unsafe_allow_html=True)
                 except Exception as e:
                     logging.error(f"Plotting failed for {ticker}: {e}")
                     st.warning(f"Plot failed for {name}")
