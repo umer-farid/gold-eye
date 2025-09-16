@@ -40,6 +40,14 @@ impact_keywords = {
 positive_words = ["rise", "growth", "bullish", "positive", "strong"]
 negative_words = ["fall", "decline", "bearish", "negative", "weak"]
 
+# --- Assets for Volatility Terminal ---
+assets = {
+    "Gold Futures": "GC=F",
+    "US Dollar Index": "DX-Y.NYB",
+    "US 10Y Yield": "^TNX",
+    "S&P 500": "^GSPC",
+}
+
 # --- Helpers ---
 def parse_pub_date(pub_date_str):
     try:
@@ -126,74 +134,80 @@ def fetch_feeds():
 
 
 @st.cache_data(ttl=900, show_spinner=False)
-def fetch_gold_volatility():
+def fetch_volatility(ticker):
     try:
-        df = yf.download("GC=F", period="1mo", interval="1h")  # Gold futures
+        df = yf.download(ticker, period="1mo", interval="1h")
         df["Returns"] = df["Close"].pct_change()
         df["Volatility"] = df["Returns"].rolling(window=24).std() * (24 ** 0.5)  # dailyized
         return df.dropna()
     except Exception as e:
-        logging.error(f"Volatility fetch failed: {e}")
+        logging.error(f"Volatility fetch failed for {ticker}: {e}")
         return pd.DataFrame()
 
 
 # --- Streamlit app ---
-st.set_page_config(page_title="Gold Eye - Terminal", layout="wide")
-st.title("🟡 Gold Eye - Multi-Terminal")
+st.set_page_config(page_title="Gold Eye - Terminals", layout="wide")
+st.title("🟡 Gold Eye - Multi-Terminals")
 
 slow_refresh = st.sidebar.slider("Refresh interval (seconds)", 60, 900, 300)
 
-# --- News Terminal ---
-st.header("📰 Terminal News")
-with st.spinner("Fetching latest feeds..."):
-    feed_data = fetch_feeds()
+# Layout: News (left) | Volatility (right)
+col1, col2 = st.columns([2, 2])
 
-all_news = []
-for category, items in feed_data.items():
-    for item in items:
-        all_news.append(item)
+with col1:
+    st.markdown("### 📰 Terminal News")
+    with st.spinner("Fetching latest feeds..."):
+        feed_data = fetch_feeds()
 
-dedup = {item["link"]: item for item in all_news if item["link"]}
-all_news = list(dedup.values())
-all_news.sort(key=lambda x: x["pub"], reverse=True)
+    all_news = []
+    for category, items in feed_data.items():
+        for item in items:
+            all_news.append(item)
 
-important_news = [
-    n for n in all_news if n["impact"] != "general" or n["sentiment"] != "Neutral"
-]
+    dedup = {item["link"]: item for item in all_news if item["link"]}
+    all_news = list(dedup.values())
+    all_news.sort(key=lambda x: x["pub"], reverse=True)
 
-st.subheader("⚡ Important News")
-if important_news:
-    for n in important_news[:15]:
-        safe_title = re.sub(r'<.*?>', '', n["title"])
-        st.markdown(f"**[{safe_title}]({n['link']})**  ")
-        st.caption(f"{n['impact'].title()} | {n['sentiment']} | {n['pub'].strftime('%Y-%m-%d %H:%M %Z')}")
-else:
-    st.info("No important news detected.")
+    important_news = [
+        n for n in all_news if n["impact"] != "general" or n["sentiment"] != "Neutral"
+    ]
 
-st.subheader("📊 Sentiment Heatmap")
-if all_news:
-    df = pd.DataFrame(all_news)
-    impact_counts = df.groupby(["impact", "sentiment"]).size().reset_index(name="count")
-    fig = px.density_heatmap(
-        impact_counts,
-        x="impact",
-        y="sentiment",
-        z="count",
-        text_auto=True,
-        color_continuous_scale="Viridis",
-    )
-    st.plotly_chart(fig, use_container_width=True)
-else:
-    st.warning("No data available to plot heatmap.")
+    st.subheader("⚡ Important News")
+    if important_news:
+        for n in important_news[:10]:
+            safe_title = re.sub(r'<.*?>', '', n["title"])
+            st.markdown(f"**[{safe_title}]({n['link']})**")
+            st.caption(f"{n['impact'].title()} | {n['sentiment']} | {n['pub'].strftime('%Y-%m-%d %H:%M %Z')}")
+    else:
+        st.info("No important news detected.")
 
-# --- Volatility Terminal ---
-st.header("📉 Volatility Terminal")
-with st.spinner("Calculating gold volatility..."):
-    vol_data = fetch_gold_volatility()
+    st.subheader("📊 Sentiment Heatmap")
+    if all_news:
+        df = pd.DataFrame(all_news)
+        impact_counts = df.groupby(["impact", "sentiment"]).size().reset_index(name="count")
+        fig = px.density_heatmap(
+            impact_counts,
+            x="impact",
+            y="sentiment",
+            z="count",
+            text_auto=True,
+            color_continuous_scale="Viridis",
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.warning("No data available to plot heatmap.")
 
-if not vol_data.empty:
-    st.line_chart(vol_data["Volatility"], height=300)
-    latest_vol = vol_data["Volatility"].iloc[-1]
-    st.metric("Current Gold Volatility (1D)", f"{latest_vol:.2%}")
-else:
-    st.error("Could not fetch gold volatility data.")
+with col2:
+    st.markdown("### 📉 Volatility Terminal")
+    vol_cols = st.columns(2)
+    idx = 0
+    for name, ticker in assets.items():
+        df = fetch_volatility(ticker)
+        if not df.empty:
+            with vol_cols[idx % 2]:
+                st.markdown(f"**{name}**")
+                st.line_chart(df["Volatility"], height=200)
+                st.metric("Current Vol", f"{df['Volatility'].iloc[-1]:.2%}")
+        else:
+            st.warning(f"No data for {name}")
+        idx += 1
