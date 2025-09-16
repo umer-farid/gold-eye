@@ -1,370 +1,199 @@
-import streamlit as st
 import requests
-from xml.etree import ElementTree as ET
-from urllib.parse import urlparse
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from streamlit_autorefresh import st_autorefresh
-from datetime import datetime
-import pytz
-import plotly.express as px
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
+import logging
+import re
+import streamlit as st
 import pandas as pd
-from dateutil import parser
+import plotly.express as px
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dateutil import parser as date_parser
+import yfinance as yf
 
-# -----------------------
-# Page Config & Header
-# -----------------------
-st.set_page_config(page_title="GOLDEye Terminal", layout="wide")
-st.markdown("<h1 style='text-align: center;'>GOLDEye Terminal</h1>", unsafe_allow_html=True)
-st.markdown("<p style='text-align: center; font-style: italic; color: orange;'>“From Headlines to Market Moves – Umer Farid”</p>", unsafe_allow_html=True)
+# --- Setup logging ---
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# -----------------------
-# Sidebar Controls
-# -----------------------
-st.sidebar.header("Controls")
-slow_refresh = st.sidebar.number_input("News refresh interval (seconds)", 30, 600, 60)
-st_autorefresh(interval=slow_refresh*1000, key="refresh")
-
-tz = pytz.timezone("Asia/Karachi")
-def _ts(): return datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-def safe_domain(url): return urlparse(url).netloc.replace("www.","") if url else url
-
-def parse_pub_date(pub_raw: str):
-    """Parse publication date safely from RSS/Atom feeds."""
-    if not pub_raw:
-        return datetime.utcnow().replace(tzinfo=pytz.utc)
-    try:
-        dt = parser.parse(pub_raw)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=pytz.utc)
-        return dt
-    except:
-        return datetime.utcnow().replace(tzinfo=pytz.utc)
-
-# -----------------------
-# Feeds
-# -----------------------
+# --- Feeds list ---
 feeds = {
-    "market_feeds": {
-        "tradingview": "https://www.tradingview.com/news/rss/",
-        "fxstreet": "https://www.fxstreet.com/rss/news",
-        "fxempire": "https://www.fxempire.com/news/feed",
-        "investing_news": "https://www.investing.com/news/",
-        "forexfactory": "https://www.forexfactory.com/calendar",
-        "investing_econ": "https://www.investing.com/economic-calendar/",
-        "fxstreet_cal": "https://www.fxstreet.com/economic-calendar",
-        "tradingeconomics_cal": "https://tradingeconomics.com/calendar",
-        "yahoo_fin": "https://finance.yahoo.com",
-        "tradingeconomics_us": "https://tradingeconomics.com/united-states/indicators",
-        "forexfactory_base": "https://www.forexfactory.com",
-        "fxstreet_base": "https://www.fxstreet.com",
-        "investing_commodities": "https://www.investing.com/commodities/rss/news.rss",
-        "reuters_commodities": "https://www.reuters.com/rssFeed/commodities",
-        "bloomberg_commodities": "https://www.bloomberg.com/feed/podcast/commodities.xml",
-        "fxempire_commodities": "https://www.fxempire.com/commodities/rss",
-        "oilprice": "https://oilprice.com/rss",
-        "kitco_metals": "https://www.kitco.com/rss",
-        "marketwatch_commodities": "https://www.marketwatch.com/rss/topstories/commodities"
-    },
-    "global_feeds": {
-        "reuters": "https://feeds.reuters.com/reuters/topNews",
-        "bbc": "http://feeds.bbci.co.uk/news/world/rss.xml",
-        "aljazeera": "https://www.aljazeera.com/xml/rss/all.xml",
-        "dawn": "https://www.dawn.com/feed",
-        "ap": "https://apnews.com/rss",
-        "reuters_world": "https://www.reuters.com/world",
-        "bbc_news": "https://www.bbc.com/news",
-        "cnn": "https://edition.cnn.com",
-        "gdelt_data": "http://data.gdeltproject.org/",
-        "gdelt_blog": "https://blog.gdeltproject.org/gdelt-2-0-our-global-knowledge-graph/",
-        "reliefweb": "https://reliefweb.int",
-        "reliefweb_topics": "https://reliefweb.int/updates?view=topics",
-        "usgs_quakes_day": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
-        "usgs_quakes_hour": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
-        "weather_alerts": "https://api.weather.gov/alerts",
-        "acled": "https://acleddata.com",
-        "ucdp": "https://ucdp.uu.se"
-    },
-    "jobs_feeds": {
-        "fred": "https://fred.stlouisfed.org",
-        "fred_icot": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=ICSA",
-        "bls": "https://www.bls.gov",
-        "bls_dev": "https://www.bls.gov/developers/",
-        "doleta_unemploy": "https://oui.doleta.gov/unemploy",
-        "bea": "https://www.bea.gov/data",
-        "census_api": "https://api.census.gov/data.html",
-        "worldbank_gdppc": "https://api.worldbank.org/v2/country/all/indicator/NY.GDP.PCAP.CD?format=json",
-        "oecd": "https://data.oecd.org",
-        "imf": "https://www.imf.org/en/Data",
-        "ism": "https://www.ismworld.org",
-        "ism_report": "https://www.ismworld.org/ism-report-manufacturing/",
-        "ecb_rates_html": "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html",
-        "ecb_hist": "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.csv",
-        "frankfurter": "https://api.frankfurter.app/latest?from=USD&to=EUR",
-        "exchangerate_host": "https://api.exchangerate.host/latest?base=USD&symbols=EUR,GBP",
-        "bls_jlt": "https://www.bls.gov/jlt/",
-        "doleta_claims": "https://oui.doleta.gov/unemploy/claims.asp",
-        "news_google_ism": "https://news.google.com/search?q=ISM%20manufacturing",
-        "reuters_business": "https://feeds.reuters.com/reuters/businessNews",
-        "anadolu": "https://www.aa.com.tr/en/rss/default?cat=economy",
-        "economic_times": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"
-    }
+    "Market News": [
+        "https://www.investing.com/rss/news.rss",
+        "https://www.marketwatch.com/feeds/topstories",
+    ],
+    "Global News": [
+        "https://www.reutersagency.com/feed/?best-topics=business-finance",
+        "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
+    ],
+    "Jobs Data": [
+        "https://www.bls.gov/feed/at-a-glance/Employment.xml",
+    ],
 }
 
+# --- Keywords ---
+impact_keywords = {
+    "gold": ["gold", "bullion", "precious metal"],
+    "usd": ["dollar", "usd", "greenback"],
+    "rates": ["interest rate", "rate hike", "fed", "federal reserve"],
+    "inflation": ["inflation", "cpi", "ppi"],
+    "jobs": ["jobs", "employment", "unemployment", "payroll"],
+}
 
-def _fetch_feed(name, url, max_items=50):
-    items=[]
+positive_words = ["rise", "growth", "bullish", "positive", "strong"]
+negative_words = ["fall", "decline", "bearish", "negative", "weak"]
+
+# --- Helpers ---
+def parse_pub_date(pub_date_str):
     try:
-        r = requests.get(url, timeout=8, headers={"User-Agent":"Mozilla/5.0"})
-        if r.status_code == 200:
-            root = ET.fromstring(r.content)
-            elements = root.findall('.//item')[:max_items]
-            for it in elements:
-                title = it.findtext('title') or ""
-                desc = it.findtext('description') or ""
-                pub = it.findtext('pubDate') or _ts()
-                link = it.findtext('link') or ""
-                text = title if title else desc
-                if text:
-                    items.append({"text":text,"source":safe_domain(url),"pub":pub,"link":link})
-    except: 
-        pass
-    return items
-
-@st.cache_data(ttl=slow_refresh, show_spinner=False)
-def fetch_feeds(feeds_dict):
-    all_items=[]
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(_fetch_feed, n, u): n for n,u in feeds_dict.items()}
-        for fut in as_completed(futures):
-            all_items.extend(fut.result())
-    return all_items
-
-market_items = fetch_feeds(feeds["market_feeds"])
-global_items = fetch_feeds(feeds["global_feeds"])
-jobs_items = fetch_feeds(feeds["jobs_feeds"])
-
-# -----------------------
-# Currencies
-# -----------------------
-CURRENCIES = ["USD","GOLD","EUR","JPY","AUD","GBP","NZD","CAD","CHF"]
-
-# -----------------------
-# Impact Analysis
-# -----------------------
-def analyze_impact_short(headline: str):
-    h = headline.lower()
-    impact = {c: {"value":0,"news":[]} for c in CURRENCIES}
-
-    if any(k in h for k in ["nfp","payroll","employment","jobless","claims","jolts","ism"]):
-        if any(k in h for k in ["strong","beat","better","surge","rise","increase","positive","higher"]):
-            impact["USD"]["value"] += 2; impact["USD"]["news"].append(headline)
-            impact["GOLD"]["value"] -= 1; impact["GOLD"]["news"].append(headline)
-        if any(k in h for k in ["weak","miss","fall","drop","decline","worse","below"]):
-            impact["USD"]["value"] -= 2; impact["USD"]["news"].append(headline)
-            impact["GOLD"]["value"] += 1; impact["GOLD"]["news"].append(headline)
-
-    if any(k in h for k in ["inflation","rate hike","interest rate","fed","ecb","central bank"]):
-        for c in ["USD","EUR"]:
-            impact[c]["value"] += 1; impact[c]["news"].append(headline)
-        impact["GOLD"]["value"] -= 1; impact["GOLD"]["news"].append(headline)
-
-    if any(k in h for k in ["war","attack","conflict","terror","sanction"]):
-        for c in ["USD","JPY","GOLD"]:
-            impact[c]["value"] += 1; impact[c]["news"].append(headline)
-        for c in ["EUR","AUD"]:
-            impact[c]["value"] -= 1; impact[c]["news"].append(headline)
-
-    return impact
-
-def analyze_trader_impact(headline: str):
-    h = headline.lower()
-    impact = {c: {"value":0,"news":[]} for c in CURRENCIES}
-    if "usd" in h:
-        impact["USD"]["value"] += 1; impact["USD"]["news"].append(headline)
-        impact["GOLD"]["value"] -= 1; impact["GOLD"]["news"].append(headline)
-    if "gold" in h:
-        impact["GOLD"]["value"] += 1; impact["GOLD"]["news"].append(headline)
-        impact["USD"]["value"] -= 1; impact["USD"]["news"].append(headline)
-    return impact
-
-# -----------------------
-# Aggregate impacts
-# -----------------------
-combined_impact = {c: {"value":0,"news":[]} for c in CURRENCIES}
-trader_impact = {c: {"value":0,"news":[]} for c in CURRENCIES}
-all_news = market_items + global_items + jobs_items
-
-for news in all_news:
-    cur = analyze_impact_short(news["text"])
-    tra = analyze_trader_impact(news["text"])
-    for c in CURRENCIES:
-        if cur[c]["value"] != 0:
-            combined_impact[c]["value"] += cur[c]["value"]
-            combined_impact[c]["news"].append(news["text"])
-        if tra[c]["value"] != 0:
-            trader_impact[c]["value"] += tra[c]["value"]
-            trader_impact[c]["news"].append(news["text"])
-
-# -----------------------
-# Terminal CSS Styles
-# -----------------------
-st.markdown("""
-<style>
-.terminal {
-    background-color: #111;
-    color: #0f0;
-    font-family: monospace;
-    font-size: 14px;
-    padding: 12px;
-    border-radius: 8px;
-    border: 1px solid #444;
-    max-height: 500px;
-    overflow-y: auto;
-    box-shadow: 0px 0px 10px #000 inset;
-}
-.small-terminal {
-    background-color: #000;
-    color: #0f0;
-    font-family: monospace;
-    font-size: 13px;
-    padding: 10px;
-    border-radius: 6px;
-    border: 1px solid #333;
-    max-height: 350px;
-    overflow-y: auto;
-    box-shadow: 0px 0px 5px #000 inset;
-}
-</style>
-""", unsafe_allow_html=True)
+        dt = date_parser.parse(pub_date_str)
+        if not dt.tzinfo:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception as e:
+        logging.warning(f"Date parse failed: {pub_date_str} ({e})")
+        return datetime.now(timezone.utc)
 
 
-# -----------------------
-# Important Trading Headlines Terminal
-# -----------------------
-st.markdown("### 📌 Important Trading Headlines (With Impacted Pairs)")
-trading_keywords = ["usd","gold","oil","eur","gbp","jpy","cpi","pmi","nfp","payroll","inflation",
-                    "interest rate","ecb","fed","rate hike","fomc","recession","gdp","central bank"]
+def analyze_impact(title, description):
+    impact = []
+    text = (title + " " + description).lower()
+    for k, words in impact_keywords.items():
+        if any(w in text for w in words):
+            impact.append(k)
+    return ", ".join(impact) if impact else "general"
 
-important_news = []
-for n in all_news:
-    if any(k in n["text"].lower() for k in trading_keywords):
-        cur = analyze_impact_short(n["text"])
-        tra = analyze_trader_impact(n["text"])
-        impacted = {}
-        for c in CURRENCIES:
-            net = cur[c]["value"] + tra[c]["value"]
-            if net != 0:
-                impacted[c] = net
-        if impacted:
-            n["impacted"] = impacted
-            important_news.append(n)
 
+def analyze_sentiment(title, description):
+    text = (title + " " + description).lower()
+    pos = any(word in text for word in positive_words)
+    neg = any(word in text for word in negative_words)
+    if pos and not neg:
+        return "Positive"
+    elif neg and not pos:
+        return "Negative"
+    elif pos and neg:
+        return "Mixed"
+    else:
+        return "Neutral"
+
+
+def _fetch_feed(feed_name, url):
+    try:
+        r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        root = ET.fromstring(r.content)
+        items = []
+        for item in root.findall(".//item"):
+            title = item.findtext("title", "").strip()
+            description = item.findtext("description", "").strip()
+            link = item.findtext("link", "").strip()
+            pubRaw = item.findtext("pubDate")
+            pub = parse_pub_date(pubRaw) if pubRaw else datetime.now(timezone.utc)
+            items.append(
+                {
+                    "feed": feed_name,
+                    "title": title,
+                    "description": description,
+                    "link": link,
+                    "pub": pub,
+                    "impact": analyze_impact(title, description),
+                    "sentiment": analyze_sentiment(title, description),
+                }
+            )
+        return items
+    except Exception as e:
+        logging.error(f"Failed to fetch {feed_name} ({url}): {e}")
+        return []
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_feeds():
+    all_data = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(_fetch_feed, fname, url): (fname, url)
+            for fname, urls in feeds.items()
+            for url in urls
+        }
+        for f in as_completed(futures):
+            fname, url = futures[f]
+            try:
+                items = f.result()
+                if fname not in all_data:
+                    all_data[fname] = []
+                all_data[fname].extend(items)
+            except Exception as e:
+                logging.error(f"Error in future for {fname} ({url}): {e}")
+    return all_data
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_gold_volatility():
+    try:
+        df = yf.download("GC=F", period="1mo", interval="1h")  # Gold futures
+        df["Returns"] = df["Close"].pct_change()
+        df["Volatility"] = df["Returns"].rolling(window=24).std() * (24 ** 0.5)  # dailyized
+        return df.dropna()
+    except Exception as e:
+        logging.error(f"Volatility fetch failed: {e}")
+        return pd.DataFrame()
+
+
+# --- Streamlit app ---
+st.set_page_config(page_title="Gold Eye - Terminal", layout="wide")
+st.title("🟡 Gold Eye - Multi-Terminal")
+
+slow_refresh = st.sidebar.slider("Refresh interval (seconds)", 60, 900, 300)
+
+# --- News Terminal ---
+st.header("📰 Terminal News")
+with st.spinner("Fetching latest feeds..."):
+    feed_data = fetch_feeds()
+
+all_news = []
+for category, items in feed_data.items():
+    for item in items:
+        all_news.append(item)
+
+dedup = {item["link"]: item for item in all_news if item["link"]}
+all_news = list(dedup.values())
+all_news.sort(key=lambda x: x["pub"], reverse=True)
+
+important_news = [
+    n for n in all_news if n["impact"] != "general" or n["sentiment"] != "Neutral"
+]
+
+st.subheader("⚡ Important News")
 if important_news:
-    lines = []
-    for it in important_news[:40]:
-        dt = parse_pub_date(it["pub"])
-        local_dt = dt.astimezone(tz)
-        time_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
-        tags = []
-        for c, val in it["impacted"].items():
-            if val > 0:
-                tags.append(f"<span style='color:lime; font-weight:bold;'>[{c} ↑]</span>")
-            elif val < 0:
-                tags.append(f"<span style='color:red; font-weight:bold;'>[{c} ↓]</span>")
-        tags_str = " ".join(tags)
-        lines.append(
-            f"<span style='color:cyan;'>[{time_str}]</span> "
-            f"<a href='{it['link']}' target='_blank'>{it['text']}</a> "
-            f"{tags_str} <span style='color:gray;'>({safe_domain(it['link'])})</span>"
-        )
-    st.markdown("<div class='small-terminal'>"+"<br>".join(lines)+"</div>", unsafe_allow_html=True)
+    for n in important_news[:15]:
+        safe_title = re.sub(r'<.*?>', '', n["title"])
+        st.markdown(f"**[{safe_title}]({n['link']})**  ")
+        st.caption(f"{n['impact'].title()} | {n['sentiment']} | {n['pub'].strftime('%Y-%m-%d %H:%M %Z')}")
 else:
-    st.info("No important trading headlines impacting pairs were found.")
+    st.info("No important news detected.")
 
-# -----------------------
-# Overall Impact Terminal
-# -----------------------
-st.markdown("### 📊 Overall Impact")
-def format_dual_impact(current, trader):
-    val1, val2 = current.get("value",0), trader.get("value",0)
-    color1 = "lime" if val1>0 else "red" if val1<0 else "gray"
-    color2 = "lime" if val2>0 else "red" if val2<0 else "gray"
-    news1 = "<br>".join(f"• {n}" for n in current.get("news",[])[:2])
-    news2 = "<br>".join(f"• {n}" for n in trader.get("news",[])[:2])
-    return f"<b style='color:{color1}'>Current: {val1}</b><br>{news1}<br><b style='color:{color2}'>Trader: {val2}</b><br>{news2}"
+st.subheader("📊 Sentiment Heatmap")
+if all_news:
+    df = pd.DataFrame(all_news)
+    impact_counts = df.groupby(["impact", "sentiment"]).size().reset_index(name="count")
+    fig = px.density_heatmap(
+        impact_counts,
+        x="impact",
+        y="sentiment",
+        z="count",
+        text_auto=True,
+        color_continuous_scale="Viridis",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+else:
+    st.warning("No data available to plot heatmap.")
 
-lines = [f"<span style='color:cyan;'>{c}</span><br>{format_dual_impact(combined_impact[c], trader_impact[c])}" for c in CURRENCIES]
-st.markdown("<div class='terminal'>"+"<br><br>".join(lines)+"</div>", unsafe_allow_html=True)
+# --- Volatility Terminal ---
+st.header("📉 Volatility Terminal")
+with st.spinner("Calculating gold volatility..."):
+    vol_data = fetch_gold_volatility()
 
-# -----------------------
-# Market Heatmap Terminal
-# -----------------------
-st.markdown("### 🌍 Market Heatmap (News Impact)")
-heatmap_data = {c: combined_impact[c]["value"] for c in CURRENCIES}
-df = pd.DataFrame(list(heatmap_data.items()), columns=["Asset","Impact"])
-df = df.pivot_table(index=["Asset"], values="Impact")
-fig = px.imshow(df,
-                color_continuous_scale="RdYlGn",
-                aspect="auto",
-                title="News Impact Heatmap",
-                labels=dict(color="Impact"))
-st.plotly_chart(fig, use_container_width=True)
-
-# -----------------------
-# Volatility Terminal
-# -----------------------
-st.markdown("### ⚡ Volatility Index")
-sample_vol = {"EURUSD": 0.9, "GBPJPY": 1.5, "XAUUSD": 2.1}
-lines = [f"<span>{s}: {v}% volatility</span>" for s,v in sample_vol.items()]
-st.markdown("<div class='small-terminal'>"+"<br>".join(lines)+"</div>", unsafe_allow_html=True)
-
-# -----------------------
-# News Sentiment Terminal
-# -----------------------
-st.markdown("### 📰 News Sentiment Analysis")
-def news_sentiment(text):
-    positive_words = ["beat","strong","rise","gain","bullish","surge","higher","growth"]
-    negative_words = ["miss","fall","weak","loss","bearish","drop","lower","decline"]
-    t = text.lower()
-    if any(w in t for w in positive_words): return "🟢 Positive"
-    elif any(w in t for w in negative_words): return "🔴 Negative"
-    return "⚪ Neutral"
-
-sentiment_samples = all_news[:10]
-lines = [f"{news_sentiment(it['text'])} – {it['text']}" for it in sentiment_samples]
-st.markdown("<div class='small-terminal'>"+"<br>".join(lines)+"</div>", unsafe_allow_html=True)
-# -----------------------
-# News Terminals (Market / Global / Jobs)
-# -----------------------
-r1c1, r1c2, r1c3 = st.columns(3)
-
-with r1c1:
-    st.markdown("### Market / Forex News")
-    lines = []
-    for it in market_items[:50]:
-        dt = parse_pub_date(it["pub"])
-        local_dt = dt.astimezone(tz)
-        time_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
-        lines.append(f"[{time_str}] <a href='{it['link']}' target='_blank'>{it['text']}</a>")
-    st.markdown("<div class='small-terminal'>" + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
-
-with r1c2:
-    st.markdown("### Global / Geo Events")
-    lines = []
-    for it in global_items[:50]:
-        dt = parse_pub_date(it["pub"])
-        local_dt = dt.astimezone(tz)
-        time_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
-        lines.append(f"[{time_str}] <a href='{it['link']}' target='_blank'>{it['text']}</a>")
-    st.markdown("<div class='small-terminal'>" + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
-
-with r1c3:
-    st.markdown("### Economic / Jobs Data")
-    lines = []
-    for it in jobs_items[:50]:
-        dt = parse_pub_date(it["pub"])
-        local_dt = dt.astimezone(tz)
-        time_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
-        lines.append(f"[{time_str}] <a href='{it['link']}' target='_blank'>{it['text']}</a>")
-    st.markdown("<div class='small-terminal'>" + "<br>".join(lines) + "</div>", unsafe_allow_html=True)
-
+if not vol_data.empty:
+    st.line_chart(vol_data["Volatility"], height=300)
+    latest_vol = vol_data["Volatility"].iloc[-1]
+    st.metric("Current Gold Volatility (1D)", f"{latest_vol:.2%}")
+else:
+    st.error("Could not fetch gold volatility data.")
