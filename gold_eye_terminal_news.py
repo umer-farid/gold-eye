@@ -276,7 +276,7 @@ def interpret_market(asset: str, latest_value: float) -> list[str]:
     return notes
 
 # --- Streamlit UI ---
-st.title("💻 Gold Eye - Bloomberg Style Terminals")
+st.title("Gold Eye - Terminal")
 slow_refresh = st.sidebar.slider("Refresh interval (seconds)", 60, 900, 300)
 
 col1, col2 = st.columns([2, 2])
@@ -357,4 +357,5 @@ with col2:
             st.warning(f"No volatility data for {name}")
         idx += 1
     st.markdown("</div>", unsafe_allow_html=True)
+
 
