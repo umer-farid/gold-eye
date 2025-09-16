@@ -214,11 +214,13 @@ def fetch_volatility(ticker: str) -> pd.DataFrame:
     otherwise fallback to daily candles.
     """
     try:
-        # Try 1h data first
+        # --- Try 1h data first ---
         raw = yf.download(ticker, period="1mo", interval="1h", progress=False)
+        interval = "1h"
         if raw is None or raw.empty:
-            # Fallback to daily data
+            # --- Fallback to daily ---
             raw = yf.download(ticker, period="6mo", interval="1d", progress=False)
+            interval = "1d"
 
         if raw is None or raw.empty:
             return pd.DataFrame()
@@ -231,8 +233,13 @@ def fetch_volatility(ticker: str) -> pd.DataFrame:
         if len(df) < 3:
             return pd.DataFrame()
 
+        # --- Returns + Volatility ---
         df["Returns"] = df["Close"].pct_change()
-        window = 24 if "h" in raw.index.freqstr.lower() if raw.index.freqstr else False else 5
+        if interval == "1h":
+            window = 24   # ~1 trading day
+        else:
+            window = 5    # ~1 trading week
+
         df["Volatility"] = df["Returns"].rolling(window=window).std() * (window ** 0.5)
         df = df.dropna(subset=["Volatility"])
         return df
@@ -240,6 +247,7 @@ def fetch_volatility(ticker: str) -> pd.DataFrame:
     except Exception as e:
         logging.error(f"Volatility fetch failed for {ticker}: {e}")
         return pd.DataFrame()
+
 
 
 # --- Trader-friendly Interpretation with Styling ---
@@ -385,4 +393,5 @@ with col2:
             st.warning(f"No volatility data for {name}")
         idx += 1
     st.markdown("</div>", unsafe_allow_html=True)
+
 
