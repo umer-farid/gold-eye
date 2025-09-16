@@ -1,238 +1,374 @@
-# gold_eye_volatility_fixed.py
-import streamlit as st
-import yfinance as yf
-import pandas as pd
-import numpy as np
-import plotly.express as px
+# gold_eye_terminal_news_fixed.py
+import requests
+import xml.etree.ElementTree as ET
+from datetime import datetime, timezone
 import logging
-import traceback
+import re
+import streamlit as st
+import pandas as pd
+import plotly.express as px
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dateutil import parser as date_parser
+import yfinance as yf
 
-# === Page config ===
-st.set_page_config(page_title="Gold Eye - Volatility", layout="wide")
-logging.basicConfig(level=logging.ERROR)
+# --- Streamlit config ---
+st.set_page_config(page_title="Gold Eye Terminal", layout="wide")
 
-# === CSS for badges ===
+# --- Setup logging ---
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+
+# --- Inject custom CSS ---
 st.markdown(
     """
     <style>
-    .note-bullish { background-color: #004d00; color: #00ff66; padding: 4px 8px; border-radius:6px; display:inline-block; margin:4px 2px;}
-    .note-bearish { background-color: #4d0000; color: #ff9999; padding: 4px 8px; border-radius:6px; display:inline-block; margin:4px 2px;}
-    .note-neutral { background-color: #333300; color: #ffff99; padding: 4px 8px; border-radius:6px; display:inline-block; margin:4px 2px;}
-    small { color: #cfcfcf; }
+    body { background-color: #0d0d0d; color: #e6e600; }
+    .terminal-box {
+        background-color: #1a1a1a;
+        border: 2px solid #333333;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 20px;
+        box-shadow: 0px 0px 10px #000000;
+    }
+    .terminal-title {
+        font-size: 20px;
+        font-weight: bold;
+        color: #00ffcc;
+        border-bottom: 2px solid #00ffcc;
+        margin-bottom: 10px;
+        padding-bottom: 5px;
+    }
+    .note-bullish {
+        background-color: #004d00;
+        color: #00ff66;
+        padding: 3px 6px;
+        border-radius: 4px;
+        margin-right: 4px;
+        display: inline-block;
+    }
+    .note-bearish {
+        background-color: #4d0000;
+        color: #ff6666;
+        padding: 3px 6px;
+        border-radius: 4px;
+        margin-right: 4px;
+        display: inline-block;
+    }
+    .note-neutral {
+        background-color: #333300;
+        color: #ffff66;
+        padding: 3px 6px;
+        border-radius: 4px;
+        display: inline-block;
+    }
     </style>
     """,
     unsafe_allow_html=True,
 )
 
-# === Improved volatility fetch ===
-@st.cache_data(ttl=600, show_spinner=False)
-def fetch_volatility(ticker: str, period: str = "180d", interval: str = "1d", window: int = 20) -> pd.DataFrame:
-    """
-    Download OHLC data via yfinance and compute rolling volatility.
-    Returns a DataFrame with Close, Returns, Volatility.
-    """
-    try:
-        raw = yf.download(ticker, period=period, interval=interval, progress=False, threads=True)
-        if raw is None or raw.empty or "Close" not in raw.columns:
-            return pd.DataFrame()
+# --- Feeds list (cleaned, working) ---
+feeds = {
+    "market_feeds": {
+        "fxstreet": "https://www.fxstreet.com/rss/news",
+        "fxempire": "https://www.fxempire.com/news/feed",
+        "investing_commodities": "https://www.investing.com/commodities/rss/news.rss",
+        "kitco_metals": "https://www.kitco.com/rss",
+        "reuters_commodities": "https://feeds.reuters.com/reuters/commoditiesNews",
+    },
+    "global_feeds": {
+        "reuters": "https://feeds.reuters.com/reuters/topNews",
+        "bbc": "http://feeds.bbci.co.uk/news/world/rss.xml",
+        "aljazeera": "https://www.aljazeera.com/xml/rss/all.xml",
+        "dawn": "https://www.dawn.com/feed",
+        "usgs_quakes_day": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+    }
+}
 
-        df = raw.copy()
-        df.index = pd.to_datetime(df.index)
-        df = df.sort_index()
+# --- Keywords ---
+impact_keywords = {
+    "gold": ["gold", "bullion", "precious metal"],
+    "usd": ["dollar", "usd", "greenback"],
+    "rates": ["interest rate", "rate hike", "fed", "federal reserve"],
+    "inflation": ["inflation", "cpi", "ppi"],
+    "jobs": ["jobs", "employment", "unemployment", "payroll"],
+}
+positive_words = ["rise", "growth", "bullish", "positive", "strong"]
+negative_words = ["fall", "decline", "bearish", "negative", "weak"]
 
-        df["Returns"] = df["Close"].pct_change()
-
-        # pick annualization factor based on sample frequency
-        if "d" in interval:
-            annual_factor = np.sqrt(252)
-        elif "h" in interval:
-            annual_factor = np.sqrt(252 * 24)
-        else:
-            annual_factor = np.sqrt(252)
-
-        df["Volatility"] = df["Returns"].rolling(window=window).std() * annual_factor
-        df = df.dropna(subset=["Volatility"])
-        return df
-    except Exception:
-        logging.error(traceback.format_exc())
-        return pd.DataFrame()
-
-# === Bias / interpretation function (uses price trend) ===
-def interpret_market(asset_name: str, df: pd.DataFrame) -> list[str]:
-    """
-    Determine Bullish/Bearish/Neutral based on last close vs previous close.
-    Returns a list of HTML-styled note strings.
-    """
-    notes = []
-    if df is None or df.empty or "Close" not in df.columns:
-        notes.append('<span class="note-neutral">ℹ️ No data</span>')
-        return notes
-
-    last = float(df["Close"].iloc[-1])
-    prev = float(df["Close"].iloc[-2]) if len(df["Close"]) >= 2 else last
-    pct = (last - prev) / prev if prev != 0 else 0.0
-
-    # small threshold to avoid noise
-    thr = 0.001  # 0.1%
-    if pct > thr:
-        bias = "bullish"
-    elif pct < -thr:
-        bias = "bearish"
-    else:
-        bias = "neutral"
-
-    # Human-friendly messages by asset group
-    if "Gold" in asset_name or "GC=F" in asset_name:
-        if bias == "bullish":
-            notes.append('<span class="note-bullish">🟢 Gold trending up — bullish</span>')
-        elif bias == "bearish":
-            notes.append('<span class="note-bearish">🔴 Gold trending down — bearish</span>')
-        else:
-            notes.append('<span class="note-neutral">⚖️ Gold range-bound</span>')
-
-    elif "Dollar Index" in asset_name or "DX=F" in asset_name:
-        if bias == "bullish":
-            notes.append('<span class="note-bullish">🟢 USD strengthening — pressure on Gold/EUR</span>')
-        elif bias == "bearish":
-            notes.append('<span class="note-bearish">🔴 USD weakening — supportive for Gold/risk assets</span>')
-        else:
-            notes.append('<span class="note-neutral">⚖️ USD sideways</span>')
-
-    elif "10Y" in asset_name or "^TNX" in asset_name:
-        if bias == "bullish":
-            notes.append('<span class="note-bullish">🟢 Yields up — tighter financial conditions</span>')
-        elif bias == "bearish":
-            notes.append('<span class="note-bearish">🔴 Yields down — easier conditions</span>')
-        else:
-            notes.append('<span class="note-neutral">⚖️ Yields flat</span>')
-
-    elif "S&P" in asset_name or "^GSPC" in asset_name:
-        if bias == "bullish":
-            notes.append('<span class="note-bullish">🟢 Stocks up — risk-on</span>')
-        elif bias == "bearish":
-            notes.append('<span class="note-bearish">🔴 Stocks down — risk-off</span>')
-        else:
-            notes.append('<span class="note-neutral">⚖️ Stocks sideways</span>')
-
-    elif "EUR" in asset_name or "6E" in asset_name:
-        if bias == "bullish":
-            notes.append('<span class="note-bullish">🟢 EUR strength vs USD</span>')
-        elif bias == "bearish":
-            notes.append('<span class="note-bearish">🔴 EUR weakness vs USD</span>')
-        else:
-            notes.append('<span class="note-neutral">⚖️ EUR range-bound</span>')
-
-    elif "GBP" in asset_name or "6B" in asset_name:
-        if bias == "bullish":
-            notes.append('<span class="note-bullish">🟢 GBP strength vs USD</span>')
-        elif bias == "bearish":
-            notes.append('<span class="note-bearish">🔴 GBP weakness vs USD</span>')
-        else:
-            notes.append('<span class="note-neutral">⚖️ GBP sideways</span>')
-
-    elif "JPY" in asset_name or "6J" in asset_name or "JPY=X" in asset_name:
-        # USD/JPY rising => JPY weaker (risk-on); falling => JPY stronger (risk-off)
-        if bias == "bullish":
-            notes.append('<span class="note-bullish">🟢 USD/JPY up — JPY weaker (risk-on)</span>')
-        elif bias == "bearish":
-            notes.append('<span class="note-bearish">🔴 USD/JPY down — JPY stronger (risk-off)</span>')
-        else:
-            notes.append('<span class="note-neutral">⚖️ USD/JPY sideways</span>')
-
-    else:
-        # fallback
-        if bias == "bullish":
-            notes.append('<span class="note-bullish">🟢 Price trending up</span>')
-        elif bias == "bearish":
-            notes.append('<span class="note-bearish">🔴 Price trending down</span>')
-        else:
-            notes.append('<span class="note-neutral">⚖️ No clear bias</span>')
-
-    # Add tiny change summary
-    notes.append(f"<small>Change: {pct*100:.2f}% ({prev:.4f} → {last:.4f})</small>")
-    return notes
-
-# === Assets ===
-assets_core = {
+# --- Assets for Volatility Terminal ---
+assets = {
     "Gold Futures": "GC=F",
-    "US Dollar Index": "DX=F",
+    "US Dollar Index": "DX-Y.NYB",
     "US 10Y Yield": "^TNX",
     "S&P 500": "^GSPC",
 }
 
-assets_spot = {
-    "EUR/USD": "EURUSD=X",
-    "GBP/USD": "GBPUSD=X",
-    "USD/JPY": "JPY=X",
-}
+# --- Helpers ---
+def parse_pub_date(pub_date_str):
+    try:
+        dt = date_parser.parse(pub_date_str)
+        if not dt.tzinfo:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return datetime.now(timezone.utc)
 
-assets_futures = {
-    "Euro Futures (6E)": "6E=F",
-    "British Pound Futures (6B)": "6B=F",
-    "Japanese Yen Futures (6J)": "6J=F",
-}
 
-# === Dashboard renderer with better debug and robust plotting ===
-def show_volatility_dashboard(assets_dict, period="180d", interval="1d", window=20):
-    cols = st.columns(2)
-    i = 0
-    for name, ticker in assets_dict.items():
-        col = cols[i % 2]
-        with col:
-            st.markdown(f"**{name}** — `{ticker}`")
-            df = fetch_volatility(ticker, period=period, interval=interval, window=window)
+def analyze_impact(title, description):
+    impact = []
+    text = (title + " " + description).lower()
+    for k, words in impact_keywords.items():
+        if any(w in text for w in words):
+            impact.append(k)
+    return ", ".join(impact) if impact else "general"
 
-            if df.empty:
-                st.warning(f"No volatility data for {name} ({ticker})")
-                # helpful debug expander
-                with st.expander(f"Debug: raw download for {ticker}"):
-                    try:
-                        raw = yf.download(ticker, period="60d", interval="1d", progress=False, threads=True)
-                        st.write("raw.tail():")
-                        st.write(raw.tail())
-                    except Exception as e:
-                        st.write("Raw download failed:", str(e))
+
+def analyze_sentiment(title, description):
+    text = (title + " " + description).lower()
+    pos = any(word in text for word in positive_words)
+    neg = any(word in text for word in negative_words)
+    if pos and not neg:
+        return "Positive"
+    elif neg and not pos:
+        return "Negative"
+    elif pos and neg:
+        return "Mixed"
+    else:
+        return "Neutral"
+
+
+def _fetch_feed(feed_name, url):
+    try:
+        r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
+        r.raise_for_status()
+        content_type = r.headers.get("Content-Type", "").lower()
+
+        # JSON feeds (USGS earthquakes, etc.)
+        if "json" in content_type or url.endswith(".json") or url.endswith(".geojson"):
+            data = r.json()
+            items = []
+            if "features" in data:  # USGS format
+                for f in data["features"]:
+                    props = f.get("properties", {})
+                    items.append({
+                        "feed": feed_name,
+                        "title": props.get("title", ""),
+                        "description": props.get("place", ""),
+                        "link": props.get("url", ""),
+                        "pub": datetime.fromtimestamp(props.get("time", 0) / 1000, tz=timezone.utc),
+                        "impact": "general",
+                        "sentiment": "Neutral",
+                    })
+            return items
+
+        # XML / RSS feeds
+        root = ET.fromstring(r.content)
+        items = []
+        for item in root.findall(".//item"):
+            title = item.findtext("title", "").strip()
+            description = item.findtext("description", "").strip()
+            link = item.findtext("link", "").strip()
+            pubRaw = item.findtext("pubDate")
+            pub = parse_pub_date(pubRaw) if pubRaw else datetime.now(timezone.utc)
+            items.append({
+                "feed": feed_name,
+                "title": title,
+                "description": description,
+                "link": link,
+                "pub": pub,
+                "impact": analyze_impact(title, description),
+                "sentiment": analyze_sentiment(title, description),
+            })
+        return items
+
+    except Exception as e:
+        logging.error(f"Failed to fetch {feed_name} ({url}): {e}")
+        return []
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def fetch_feeds():
+    all_data = {}
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {
+            executor.submit(_fetch_feed, fname, url): (fname, url)
+            for category, feed_group in feeds.items()
+            for fname, url in feed_group.items()
+        }
+        for f in as_completed(futures):
+            fname, url = futures[f]
+            try:
+                items = f.result()
+                if fname not in all_data:
+                    all_data[fname] = []
+                all_data[fname].extend(items)
+            except Exception as e:
+                logging.error(f"Error in future for {fname} ({url}): {e}")
+    return all_data
+
+
+@st.cache_data(ttl=900, show_spinner=False)
+def fetch_volatility(ticker: str) -> pd.DataFrame:
+    try:
+        raw = yf.download(ticker, period="1mo", interval="1h", progress=False)
+        if raw is None or raw.empty:
+            return pd.DataFrame()
+
+        price_series = raw["Close"] if "Close" in raw.columns else raw.iloc[:, 0]
+        df = pd.DataFrame({"Close": price_series})
+        df.index = pd.to_datetime(df.index)
+        df = df.sort_index()
+        if len(df) < 3:
+            return pd.DataFrame()
+
+        df["Returns"] = df["Close"].pct_change()
+        df["Volatility"] = df["Returns"].rolling(window=24).std() * (24 ** 0.5)
+        df = df.dropna(subset=["Volatility"])
+        return df
+    except Exception as e:
+        logging.error(f"Volatility fetch failed for {ticker}: {e}")
+        return pd.DataFrame()
+
+# --- Trader-friendly Interpretation with Styling ---
+def interpret_market(asset: str, df: pd.DataFrame) -> list[str]:
+    notes = []
+    if asset == "US 10Y Yield":
+        latest_value = df["Volatility"].iloc[-1]
+        if latest_value < 0.02:
+            notes = [
+                '<span class="note-bullish">🟢 Bullish Gold</span>',
+                '<span class="note-bearish">🔴 Bearish USD</span>',
+                '<span class="note-bullish">🟢 Supportive Stocks</span>',
+            ]
+        elif latest_value > 0.04:
+            notes = [
+                '<span class="note-bearish">🔴 Bearish Gold</span>',
+                '<span class="note-bullish">🟢 Bullish USD</span>',
+                '<span class="note-bearish">🔴 Risk-Off Stocks</span>',
+            ]
+        else:
+            notes = ['<span class="note-neutral">⚖️ Neutral across markets</span>']
+
+    elif asset == "US Dollar Index":
+        latest_value = df["Close"].iloc[-1]
+        if latest_value > 105:
+            notes = [
+                '<span class="note-bearish">🔴 Bearish Gold</span>',
+                '<span class="note-bullish">🟢 Bullish USD</span>',
+                '<span class="note-bearish">🔴 Weighs on Stocks</span>',
+            ]
+        elif latest_value < 100:
+            notes = [
+                '<span class="note-bullish">🟢 Bullish Gold</span>',
+                '<span class="note-bearish">🔴 Weak USD</span>',
+                '<span class="note-bullish">🟢 Supportive Stocks</span>',
+            ]
+        else:
+            notes = ['<span class="note-neutral">⚖️ Range-bound impact</span>']
+
+    elif asset == "Gold Futures":
+        trend_up = df["Close"].iloc[-1] > df["Close"].iloc[-2]
+        notes = [
+            '<span class="note-bullish">🟢 Rising Gold supports bulls</span>'
+            if trend_up else '<span class="note-bearish">🔴 Falling Gold pressures bulls</span>'
+        ]
+
+    elif asset == "S&P 500":
+        trend_up = df["Close"].iloc[-1] > df["Close"].iloc[-2]
+        notes = [
+            '<span class="note-bullish">🟢 Bullish Stocks = Risk-On, 🔴 Bearish Gold</span>'
+            if trend_up else '<span class="note-bearish">🔴 Bearish Stocks = Risk-Off, 🟢 Bullish Gold</span>'
+        ]
+
+    else:
+        notes = ['<span class="note-neutral">ℹ️ No bias rules defined</span>']
+    return notes
+
+# --- Streamlit UI ---
+st.title("Gold Eye - Terminal")
+slow_refresh = st.sidebar.slider("Refresh interval (seconds)", 60, 900, 300)
+
+col1, col2 = st.columns([2, 2])
+
+# --- News Terminal ---
+with col1:
+    st.markdown('<div class="terminal-box"><div class="terminal-title">Headlines</div>', unsafe_allow_html=True)
+    feed_data = fetch_feeds()
+
+    all_news = []
+    for _, items in feed_data.items():
+        all_news.extend(items)
+
+    dedup = {item["link"]: item for item in all_news if item.get("link")}
+    all_news = list(dedup.values())
+    all_news.sort(key=lambda x: x["pub"], reverse=True)
+
+    important_news = [
+        n for n in all_news if n["impact"] != "general" or n["sentiment"] != "Neutral"
+    ]
+
+    st.markdown("**⚡ Important News**")
+    if important_news:
+        for n in important_news[:10]:
+            safe_title = re.sub(r"<.*?>", "", n["title"], flags=re.DOTALL)
+            st.markdown(f"🔹 **[{safe_title}]({n['link']})**")
+            st.caption(f"{n['impact'].title()} | {n['sentiment']} | {n['pub'].strftime('%Y-%m-%d %H:%M %Z')}")
+    else:
+        st.info("No important news detected, showing latest headlines.")
+        for n in all_news[:10]:
+            safe_title = re.sub(r"<.*?>", "", n["title"], flags=re.DOTALL)
+            st.markdown(f"▫️ **[{safe_title}]({n['link']})**")
+            st.caption(f"{n['impact'].title()} | {n['sentiment']} | {n['pub'].strftime('%Y-%m-%d %H:%M %Z')}")
+
+    st.markdown("** Sentiment Heatmap**")
+    if all_news:
+        df_news = pd.DataFrame(all_news)
+        if not df_news.empty and {"impact", "sentiment"}.issubset(df_news.columns):
+            impact_counts = df_news.groupby(["impact", "sentiment"]).size().reset_index(name="count")
+            if not impact_counts.empty:
+                fig = px.density_heatmap(
+                    impact_counts,
+                    x="impact",
+                    y="sentiment",
+                    z="count",
+                    text_auto=True,
+                    color_continuous_scale="Viridis",
+                    template="plotly_dark",
+                )
+                st.plotly_chart(fig, use_container_width=True)
             else:
-                # Plot volatility (px uses fig height and st.plotly_chart with use_container_width)
+                st.info("No sentiment buckets to display.")
+        else:
+            st.info("No sentiment data available.")
+    else:
+        st.info("No news data available.")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    with st.expander("🔎 Debug: Raw Feeds"):
+        st.json(all_news[:5])
+
+# --- Volatility Terminal ---
+with col2:
+    st.markdown('<div class="terminal-box"><div class="terminal-title"> Volatility Terminal</div>', unsafe_allow_html=True)
+    vol_cols = st.columns(2)
+    idx = 0
+    for name, ticker in assets.items():
+        df_vol = fetch_volatility(ticker)
+        if not df_vol.empty:
+            with vol_cols[idx % 2]:
+                st.markdown(f"**{name}**")
                 try:
-                    fig = px.line(df, x=df.index, y="Volatility", template="plotly_dark", height=220)
-                    fig.update_xaxes(showgrid=False)
-                    fig.update_yaxes(showgrid=False)
+                    fig = px.line(df_vol, x=df_vol.index, y="Volatility", template="plotly_dark", height=200)
                     st.plotly_chart(fig, use_container_width=True)
-
-                    latest_vol = df["Volatility"].iloc[-1]
+                    latest_vol = df_vol["Volatility"].iloc[-1]
                     st.metric("Current Vol", f"{latest_vol:.2%}")
-
-                    # now interpret using price trend (df is passed)
-                    notes = interpret_market(name, df)
+                    notes = interpret_market(name, df_vol)
                     for n in notes:
                         st.markdown(n, unsafe_allow_html=True)
-                except Exception:
-                    logging.error(traceback.format_exc())
-                    st.error(f"Plot failed for {name}. See debug expander.")
-                    with st.expander(f"Plot debug for {ticker}"):
-                        st.write(df.tail())
-        i += 1
-
-# === UI ===
-st.title("Gold Eye — Volatility (fixed)")
-tab1, tab2, tab3 = st.tabs(["📈 Core Markets", "💱 Spot FX", "📊 Currency Futures"])
-
-with tab1:
-    show_volatility_dashboard(assets_core, period="180d", interval="1d", window=20)
-
-with tab2:
-    show_volatility_dashboard(assets_spot, period="180d", interval="1d", window=20)
-
-with tab3:
-    show_volatility_dashboard(assets_futures, period="180d", interval="1d", window=20)
-
-# Optional debug summary at bottom
-with st.expander("🔎 Quick debug: show last few rows for all tickers"):
-    for name, ticker in {**assets_core, **assets_spot, **assets_futures}.items():
-        df = fetch_volatility(ticker, period="60d", interval="1d", window=10)
-        st.write(f"--- {name} ({ticker}) ---")
-        if df.empty:
-            st.write("No data returned")
+                except Exception as e:
+                    logging.error(f"Plotting failed for {ticker}: {e}")
+                    st.warning(f"Plot failed for {name}")
         else:
-            st.dataframe(df.tail(), use_container_width=True)
+            st.warning(f"No volatility data for {name}")
+        idx += 1
+    st.markdown("</div>", unsafe_allow_html=True)
