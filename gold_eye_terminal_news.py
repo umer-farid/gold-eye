@@ -13,6 +13,38 @@ import yfinance as yf
 # --- Setup logging ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
+# --- Inject custom CSS for Bloomberg-style terminal ---
+st.markdown("""
+    <style>
+    body {
+        background-color: #0d0d0d;
+        color: #e6e600;
+    }
+    .terminal-box {
+        background-color: #1a1a1a;
+        border: 2px solid #333333;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 20px;
+        box-shadow: 0px 0px 10px #000000;
+    }
+    .terminal-title {
+        font-size: 20px;
+        font-weight: bold;
+        color: #00ffcc;
+        border-bottom: 2px solid #00ffcc;
+        margin-bottom: 10px;
+        padding-bottom: 5px;
+    }
+    .stMetric {
+        background-color: #000000 !important;
+        border: 1px solid #333333;
+        padding: 10px;
+        border-radius: 5px;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 # --- Feeds list ---
 feeds = {
     "Market News": [
@@ -55,8 +87,7 @@ def parse_pub_date(pub_date_str):
         if not dt.tzinfo:
             dt = dt.replace(tzinfo=timezone.utc)
         return dt
-    except Exception as e:
-        logging.warning(f"Date parse failed: {pub_date_str} ({e})")
+    except Exception:
         return datetime.now(timezone.utc)
 
 
@@ -138,7 +169,7 @@ def fetch_volatility(ticker):
     try:
         df = yf.download(ticker, period="1mo", interval="1h")
         df["Returns"] = df["Close"].pct_change()
-        df["Volatility"] = df["Returns"].rolling(window=24).std() * (24 ** 0.5)  # dailyized
+        df["Volatility"] = df["Returns"].rolling(window=24).std() * (24 ** 0.5)
         return df.dropna()
     except Exception as e:
         logging.error(f"Volatility fetch failed for {ticker}: {e}")
@@ -147,22 +178,17 @@ def fetch_volatility(ticker):
 
 # --- Streamlit app ---
 st.set_page_config(page_title="Gold Eye - Terminals", layout="wide")
-st.title("🟡 Gold Eye - Multi-Terminals")
+st.title("💻 Gold Eye - Bloomberg Style Terminals")
 
-slow_refresh = st.sidebar.slider("Refresh interval (seconds)", 60, 900, 300)
-
-# Layout: News (left) | Volatility (right)
 col1, col2 = st.columns([2, 2])
 
 with col1:
-    st.markdown("### 📰 Terminal News")
-    with st.spinner("Fetching latest feeds..."):
-        feed_data = fetch_feeds()
+    st.markdown('<div class="terminal-box"><div class="terminal-title">📰 Terminal News</div>', unsafe_allow_html=True)
+    feed_data = fetch_feeds()
 
     all_news = []
     for category, items in feed_data.items():
-        for item in items:
-            all_news.append(item)
+        all_news.extend(items)
 
     dedup = {item["link"]: item for item in all_news if item["link"]}
     all_news = list(dedup.values())
@@ -172,16 +198,16 @@ with col1:
         n for n in all_news if n["impact"] != "general" or n["sentiment"] != "Neutral"
     ]
 
-    st.subheader("⚡ Important News")
+    st.markdown("**⚡ Important News**")
     if important_news:
         for n in important_news[:10]:
             safe_title = re.sub(r'<.*?>', '', n["title"])
-            st.markdown(f"**[{safe_title}]({n['link']})**")
+            st.markdown(f"🔹 **[{safe_title}]({n['link']})**")
             st.caption(f"{n['impact'].title()} | {n['sentiment']} | {n['pub'].strftime('%Y-%m-%d %H:%M %Z')}")
     else:
         st.info("No important news detected.")
 
-    st.subheader("📊 Sentiment Heatmap")
+    st.markdown("**📊 Sentiment Heatmap**")
     if all_news:
         df = pd.DataFrame(all_news)
         impact_counts = df.groupby(["impact", "sentiment"]).size().reset_index(name="count")
@@ -192,13 +218,15 @@ with col1:
             z="count",
             text_auto=True,
             color_continuous_scale="Viridis",
+            template="plotly_dark"
         )
         st.plotly_chart(fig, use_container_width=True)
     else:
         st.warning("No data available to plot heatmap.")
+    st.markdown("</div>", unsafe_allow_html=True)
 
 with col2:
-    st.markdown("### 📉 Volatility Terminal")
+    st.markdown('<div class="terminal-box"><div class="terminal-title">📉 Volatility Terminal</div>', unsafe_allow_html=True)
     vol_cols = st.columns(2)
     idx = 0
     for name, ticker in assets.items():
@@ -206,8 +234,10 @@ with col2:
         if not df.empty:
             with vol_cols[idx % 2]:
                 st.markdown(f"**{name}**")
-                st.line_chart(df["Volatility"], height=200)
+                fig = px.line(df, y="Volatility", template="plotly_dark")
+                st.plotly_chart(fig, use_container_width=True, height=200)
                 st.metric("Current Vol", f"{df['Volatility'].iloc[-1]:.2%}")
         else:
             st.warning(f"No data for {name}")
         idx += 1
+    st.markdown("</div>", unsafe_allow_html=True)
