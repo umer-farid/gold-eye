@@ -12,7 +12,7 @@ from dateutil import parser as date_parser
 import yfinance as yf
 
 # --- Streamlit config ---
-st.set_page_config(page_title="Gold Eye - Terminals", layout="wide")
+st.set_page_config(page_title="Gold Eye", layout="wide")
 
 # --- Setup logging ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -357,3 +357,4 @@ with col2:
             st.warning(f"No volatility data for {name}")
         idx += 1
     st.markdown("</div>", unsafe_allow_html=True)
+
