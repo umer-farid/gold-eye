@@ -209,8 +209,17 @@ def fetch_feeds():
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_volatility(ticker: str) -> pd.DataFrame:
+    """
+    Fetch volatility with intraday (1h) if available,
+    otherwise fallback to daily candles.
+    """
     try:
+        # Try 1h data first
         raw = yf.download(ticker, period="1mo", interval="1h", progress=False)
+        if raw is None or raw.empty:
+            # Fallback to daily data
+            raw = yf.download(ticker, period="6mo", interval="1d", progress=False)
+
         if raw is None or raw.empty:
             return pd.DataFrame()
 
@@ -218,16 +227,20 @@ def fetch_volatility(ticker: str) -> pd.DataFrame:
         df = pd.DataFrame({"Close": price_series})
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
+
         if len(df) < 3:
             return pd.DataFrame()
 
         df["Returns"] = df["Close"].pct_change()
-        df["Volatility"] = df["Returns"].rolling(window=24).std() * (24 ** 0.5)
+        window = 24 if "h" in raw.index.freqstr.lower() if raw.index.freqstr else False else 5
+        df["Volatility"] = df["Returns"].rolling(window=window).std() * (window ** 0.5)
         df = df.dropna(subset=["Volatility"])
         return df
+
     except Exception as e:
         logging.error(f"Volatility fetch failed for {ticker}: {e}")
         return pd.DataFrame()
+
 
 # --- Trader-friendly Interpretation with Styling ---
 def interpret_market(asset: str, df: pd.DataFrame) -> list[str]:
@@ -372,3 +385,4 @@ with col2:
             st.warning(f"No volatility data for {name}")
         idx += 1
     st.markdown("</div>", unsafe_allow_html=True)
+
