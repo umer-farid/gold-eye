@@ -81,17 +81,70 @@ st.markdown(
 
 # --- Feeds list ---
 feeds = {
-    "Market News": [
-        "https://www.investing.com/rss/news.rss",
-        "https://www.marketwatch.com/feeds/topstories",
-    ],
-    "Global News": [
-        "https://www.reutersagency.com/feed/?best-topics=business-finance",
-        "https://feeds.a.dj.com/rss/RSSMarketsMain.xml",
-    ],
-    "Jobs Data": [
-        "https://www.bls.gov/feed/at-a-glance/Employment.xml",
-    ],
+    "market_feeds": {
+        "tradingview": "https://www.tradingview.com/news/rss/",
+        "fxstreet": "https://www.fxstreet.com/rss/news",
+        "fxempire": "https://www.fxempire.com/news/feed",
+        "investing_news": "https://www.investing.com/news/",
+        "forexfactory": "https://www.forexfactory.com/calendar",
+        "investing_econ": "https://www.investing.com/economic-calendar/",
+        "fxstreet_cal": "https://www.fxstreet.com/economic-calendar",
+        "tradingeconomics_cal": "https://tradingeconomics.com/calendar",
+        "yahoo_fin": "https://finance.yahoo.com",
+        "tradingeconomics_us": "https://tradingeconomics.com/united-states/indicators",
+        "forexfactory_base": "https://www.forexfactory.com",
+        "fxstreet_base": "https://www.fxstreet.com",
+        "investing_commodities": "https://www.investing.com/commodities/rss/news.rss",
+        "reuters_commodities": "https://www.reuters.com/rssFeed/commodities",
+        "bloomberg_commodities": "https://www.bloomberg.com/feed/podcast/commodities.xml",
+        "fxempire_commodities": "https://www.fxempire.com/commodities/rss",
+        "oilprice": "https://oilprice.com/rss",
+        "kitco_metals": "https://www.kitco.com/rss",
+        "marketwatch_commodities": "https://www.marketwatch.com/rss/topstories/commodities"
+    },
+    "global_feeds": {
+        "reuters": "https://feeds.reuters.com/reuters/topNews",
+        "bbc": "http://feeds.bbci.co.uk/news/world/rss.xml",
+        "aljazeera": "https://www.aljazeera.com/xml/rss/all.xml",
+        "dawn": "https://www.dawn.com/feed",
+        "ap": "https://apnews.com/rss",
+        "reuters_world": "https://www.reuters.com/world",
+        "bbc_news": "https://www.bbc.com/news",
+        "cnn": "https://edition.cnn.com",
+        "gdelt_data": "http://data.gdeltproject.org/",
+        "gdelt_blog": "https://blog.gdeltproject.org/gdelt-2-0-our-global-knowledge-graph/",
+        "reliefweb": "https://reliefweb.int",
+        "reliefweb_topics": "https://reliefweb.int/updates?view=topics",
+        "usgs_quakes_day": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+        "usgs_quakes_hour": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
+        "weather_alerts": "https://api.weather.gov/alerts",
+        "acled": "https://acleddata.com",
+        "ucdp": "https://ucdp.uu.se"
+    },
+    "jobs_feeds": {
+        "fred": "https://fred.stlouisfed.org",
+        "fred_icot": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=ICSA",
+        "bls": "https://www.bls.gov",
+        "bls_dev": "https://www.bls.gov/developers/",
+        "doleta_unemploy": "https://oui.doleta.gov/unemploy",
+        "bea": "https://www.bea.gov/data",
+        "census_api": "https://api.census.gov/data.html",
+        "worldbank_gdppc": "https://api.worldbank.org/v2/country/all/indicator/NY.GDP.PCAP.CD?format=json",
+        "oecd": "https://data.oecd.org",
+        "imf": "https://www.imf.org/en/Data",
+        "ism": "https://www.ismworld.org",
+        "ism_report": "https://www.ismworld.org/ism-report-manufacturing/",
+        "ecb_rates_html": "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html",
+        "ecb_hist": "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.csv",
+        "frankfurter": "https://api.frankfurter.app/latest?from=USD&to=EUR",
+        "exchangerate_host": "https://api.exchangerate.host/latest?base=USD&symbols=EUR,GBP",
+        "bls_jlt": "https://www.bls.gov/jlt/",
+        "doleta_claims": "https://oui.doleta.gov/unemploy/claims.asp",
+        "news_google_ism": "https://news.google.com/search?q=ISM%20manufacturing",
+        "reuters_business": "https://feeds.reuters.com/reuters/businessNews",
+        "anadolu": "https://www.aa.com.tr/en/rss/default?cat=economy",
+        "economic_times": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"
+    }
 }
 
 # --- Keywords ---
@@ -357,6 +410,7 @@ with col2:
             st.warning(f"No volatility data for {name}")
         idx += 1
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 
 
