@@ -79,8 +79,9 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-market_feeds = {
-     "tradingview": "https://www.tradingview.com/news/rss/",
+feeds = {
+    "market_feeds": {
+        "tradingview": "https://www.tradingview.com/news/rss/",
         "fxstreet": "https://www.fxstreet.com/rss/news",
         "fxempire": "https://www.fxempire.com/news/feed",
         "investing_news": "https://www.investing.com/news/",
@@ -99,9 +100,9 @@ market_feeds = {
         "oilprice": "https://oilprice.com/rss",
         "kitco_metals": "https://www.kitco.com/rss",
         "marketwatch_commodities": "https://www.marketwatch.com/rss/topstories/commodities"
-}
-global_feeds = {
-"reuters": "https://feeds.reuters.com/reuters/topNews",
+    },
+    "global_feeds": {
+        "reuters": "https://feeds.reuters.com/reuters/topNews",
         "bbc": "http://feeds.bbci.co.uk/news/world/rss.xml",
         "aljazeera": "https://www.aljazeera.com/xml/rss/all.xml",
         "dawn": "https://www.dawn.com/feed",
@@ -118,9 +119,9 @@ global_feeds = {
         "weather_alerts": "https://api.weather.gov/alerts",
         "acled": "https://acleddata.com",
         "ucdp": "https://ucdp.uu.se"
-}
-jobs_feeds = {
-     "fred": "https://fred.stlouisfed.org",
+    },
+    "jobs_feeds": {
+        "fred": "https://fred.stlouisfed.org",
         "fred_icot": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=ICSA",
         "bls": "https://www.bls.gov",
         "bls_dev": "https://www.bls.gov/developers/",
@@ -142,6 +143,7 @@ jobs_feeds = {
         "reuters_business": "https://feeds.reuters.com/reuters/businessNews",
         "anadolu": "https://www.aa.com.tr/en/rss/default?cat=economy",
         "economic_times": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"
+    }
 }
 
 # --- Keywords ---
@@ -407,6 +409,7 @@ with col2:
             st.warning(f"No volatility data for {name}")
         idx += 1
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 
 
