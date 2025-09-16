@@ -1,4 +1,4 @@
-# gold_eye_terminal_news.py (fixed)
+# gold_eye_terminal_news.py (patched with Market Interpretation)
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -11,13 +11,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dateutil import parser as date_parser
 import yfinance as yf
 
-# --- Streamlit config must come first ---
+# --- Streamlit config ---
 st.set_page_config(page_title="Gold Eye - Terminals", layout="wide")
 
 # --- Setup logging ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 
-# --- Inject custom CSS for Bloomberg-style terminal ---
+# --- Inject custom CSS ---
 st.markdown(
     """
     <style>
@@ -77,7 +77,6 @@ impact_keywords = {
     "inflation": ["inflation", "cpi", "ppi"],
     "jobs": ["jobs", "employment", "unemployment", "payroll"],
 }
-
 positive_words = ["rise", "growth", "bullish", "positive", "strong"]
 negative_words = ["fall", "decline", "bearish", "negative", "weak"]
 
@@ -175,62 +174,26 @@ def fetch_feeds():
 
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_volatility(ticker: str) -> pd.DataFrame:
-    """
-    Download price data for `ticker` and return a DataFrame with simple columns:
-      - Close
-      - Returns
-      - Volatility
-    Robust to yfinance returning MultiIndex columns.
-    """
     try:
         raw = yf.download(ticker, period="1mo", interval="1h", progress=False)
         if raw is None or raw.empty:
-            logging.warning(f"No data returned for {ticker}")
             return pd.DataFrame()
 
-        # If yfinance returns MultiIndex columns (e.g. when group_by='ticker' or multiple tickers),
-        # extract the price series robustly:
         if isinstance(raw.columns, pd.MultiIndex):
-            # prefer 'Close' then 'Adj Close'
-            price_col = None
-            for preferred in ("Close", "Adj Close", "Adj_Close", "AdjClose"):
-                matches = [c for c in raw.columns if c[0] == preferred]
-                if matches:
-                    price_col = matches[0]
-                    break
-            if price_col is None:
-                # fallback: try to collapse to single-level by joining column tuples
-                raw.columns = ["_".join([str(x) for x in col if x]) for col in raw.columns]
-                # pick first column that looks like a price
-                for cand in ("Close", "Adj Close", "Adj_Close", "AdjClose", "close"):
-                    if cand in raw.columns:
-                        price_series = raw[cand]
-                        break
-                else:
-                    price_series = raw.iloc[:, 0]
-            else:
-                price_series = raw[price_col]
-        else:
-            # single-level columns
-            if "Close" in raw.columns:
-                price_series = raw["Close"]
-            elif "Adj Close" in raw.columns:
-                price_series = raw["Adj Close"]
+            if "Close" in raw.columns.levels[0]:
+                price_series = raw["Close"].iloc[:, 0]
             else:
                 price_series = raw.iloc[:, 0]
+        else:
+            price_series = raw["Close"] if "Close" in raw.columns else raw.iloc[:, 0]
 
-        # build a clean DataFrame
         df = pd.DataFrame({"Close": price_series})
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
-
-        # need at least 2 points to compute returns
         if len(df) < 3:
-            logging.warning(f"Not enough data points to compute volatility for {ticker}")
             return pd.DataFrame()
 
         df["Returns"] = df["Close"].pct_change()
-        # 24 hourly periods -> dailyize (sqrt of periods per day). If interval isn't hourly this is approximate.
         df["Volatility"] = df["Returns"].rolling(window=24).std() * (24 ** 0.5)
         df = df.dropna(subset=["Volatility"])
         return df
@@ -238,10 +201,33 @@ def fetch_volatility(ticker: str) -> pd.DataFrame:
         logging.error(f"Volatility fetch failed for {ticker}: {e}")
         return pd.DataFrame()
 
+# --- Trader-friendly Interpretation ---
+def interpret_market(asset: str, latest_value: float) -> list[str]:
+    notes = []
+    if asset == "US 10Y Yield":
+        if latest_value < 0.02:
+            notes = ["🟢 Bullish Gold", "🔴 Bearish USD", "🟢 Supportive Stocks"]
+        elif latest_value > 0.04:
+            notes = ["🔴 Bearish Gold", "🟢 Bullish USD", "🔴 Risk-Off Stocks"]
+        else:
+            notes = ["⚖️ Neutral across markets"]
+    elif asset == "US Dollar Index":
+        if latest_value > 105:
+            notes = ["🔴 Bearish Gold", "🟢 Bullish USD", "🔴 Weighs on Stocks"]
+        elif latest_value < 100:
+            notes = ["🟢 Bullish Gold", "🔴 Weak USD", "🟢 Supportive Stocks"]
+        else:
+            notes = ["⚖️ Range-bound impact"]
+    elif asset == "Gold Futures":
+        notes = ["🟢 Rising Gold supports bulls"] if latest_value > 0 else ["🔴 Falling Gold pressures bulls"]
+    elif asset == "S&P 500":
+        notes = ["🟢 Bullish Stocks = Risk-On, 🔴 Bearish Gold"] if latest_value > 0 else ["🔴 Bearish Stocks = Risk-Off, 🟢 Bullish Gold"]
+    else:
+        notes = ["ℹ️ No bias rules defined"]
+    return notes
 
 # --- Streamlit UI ---
 st.title("💻 Gold Eye - Bloomberg Style Terminals")
-
 slow_refresh = st.sidebar.slider("Refresh interval (seconds)", 60, 900, 300)
 
 col1, col2 = st.columns([2, 2])
@@ -304,7 +290,6 @@ with col2:
     for name, ticker in assets.items():
         df_vol = fetch_volatility(ticker)
         if not df_vol.empty:
-            # plot using index as x and simple 'Volatility' column name
             with vol_cols[idx % 2]:
                 st.markdown(f"**{name}**")
                 try:
@@ -312,6 +297,10 @@ with col2:
                     st.plotly_chart(fig, use_container_width=True, height=200)
                     latest_vol = df_vol["Volatility"].iloc[-1]
                     st.metric("Current Vol", f"{latest_vol:.2%}")
+                    # 🔹 Trader-friendly interpretation
+                    notes = interpret_market(name, latest_vol)
+                    for n in notes:
+                        st.caption(n)
                 except Exception as e:
                     logging.error(f"Plotting failed for {ticker}: {e}")
                     st.warning(f"Plot failed for {name}")
