@@ -283,7 +283,7 @@ col1, col2 = st.columns([2, 2])
 
 # --- News Terminal ---
 with col1:
-    st.markdown('<div class="terminal-box"><div class="terminal-title">📰 Terminal News</div>', unsafe_allow_html=True)
+    st.markdown('<div class="terminal-box"><div class="terminal-title">Headlines</div>', unsafe_allow_html=True)
     feed_data = fetch_feeds()
 
     all_news = []
@@ -307,7 +307,7 @@ with col1:
     else:
         st.info("No important news detected.")
 
-    st.markdown("**📊 Sentiment Heatmap**")
+    st.markdown("** Sentiment Heatmap**")
     if all_news:
         df_news = pd.DataFrame(all_news)
         if not df_news.empty and "impact" in df_news and "sentiment" in df_news:
@@ -333,7 +333,7 @@ with col1:
 
 # --- Volatility Terminal ---
 with col2:
-    st.markdown('<div class="terminal-box"><div class="terminal-title">📉 Volatility Terminal</div>', unsafe_allow_html=True)
+    st.markdown('<div class="terminal-box"><div class="terminal-title"> Volatility Terminal</div>', unsafe_allow_html=True)
     vol_cols = st.columns(2)
     idx = 0
     for name, ticker in assets.items():
@@ -357,5 +357,6 @@ with col2:
             st.warning(f"No volatility data for {name}")
         idx += 1
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 
