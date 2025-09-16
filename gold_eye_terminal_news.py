@@ -119,8 +119,6 @@ feeds = {
         "weather_alerts": "https://api.weather.gov/alerts",
         "acled": "https://acleddata.com",
         "ucdp": "https://ucdp.uu.se"
-    },
-    "jobs_feeds": {
         "fred": "https://fred.stlouisfed.org",
         "fred_icot": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=ICSA",
         "bls": "https://www.bls.gov",
@@ -409,6 +407,7 @@ with col2:
             st.warning(f"No volatility data for {name}")
         idx += 1
     st.markdown("</div>", unsafe_allow_html=True)
+
 
 
 
