@@ -1,4 +1,4 @@
-# gold_eye_terminal_news_fixed.py
+# gold_eye_terminal_news.py (rebuilt with styled trader-friendly notes)
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -12,7 +12,7 @@ from dateutil import parser as date_parser
 import yfinance as yf
 
 # --- Streamlit config ---
-st.set_page_config(page_title="Gold Eye Terminal", layout="wide")
+st.set_page_config(page_title="Gold Eye", layout="wide")
 
 # --- Setup logging ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -21,7 +21,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 st.markdown(
     """
     <style>
-    body { background-color: #0d0d0d; color: #e6e600; }
+    body {
+        background-color: #0d0d0d;
+        color: #e6e600;
+    }
     .terminal-box {
         background-color: #1a1a1a;
         border: 2px solid #333333;
@@ -38,6 +41,16 @@ st.markdown(
         margin-bottom: 10px;
         padding-bottom: 5px;
     }
+    .stMetric {
+        background-color: #000000 !important;
+        border: 1px solid #333333;
+        padding: 10px;
+        border-radius: 5px;
+    }
+    a { color: #76f1c0; }
+    .streamlit-expanderHeader { color: #e6e600 !important; }
+
+    /* --- Trader Notes Styling --- */
     .note-bullish {
         background-color: #004d00;
         color: #00ff66;
@@ -66,21 +79,71 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-# --- Feeds list (cleaned, working) ---
+# --- Feeds list ---
 feeds = {
     "market_feeds": {
+        "tradingview": "https://www.tradingview.com/news/rss/",
         "fxstreet": "https://www.fxstreet.com/rss/news",
         "fxempire": "https://www.fxempire.com/news/feed",
+        "investing_news": "https://www.investing.com/news/",
+        "forexfactory": "https://www.forexfactory.com/calendar",
+        "investing_econ": "https://www.investing.com/economic-calendar/",
+        "fxstreet_cal": "https://www.fxstreet.com/economic-calendar",
+        "tradingeconomics_cal": "https://tradingeconomics.com/calendar",
+        "yahoo_fin": "https://finance.yahoo.com",
+        "tradingeconomics_us": "https://tradingeconomics.com/united-states/indicators",
+        "forexfactory_base": "https://www.forexfactory.com",
+        "fxstreet_base": "https://www.fxstreet.com",
         "investing_commodities": "https://www.investing.com/commodities/rss/news.rss",
+        "reuters_commodities": "https://www.reuters.com/rssFeed/commodities",
+        "bloomberg_commodities": "https://www.bloomberg.com/feed/podcast/commodities.xml",
+        "fxempire_commodities": "https://www.fxempire.com/commodities/rss",
+        "oilprice": "https://oilprice.com/rss",
         "kitco_metals": "https://www.kitco.com/rss",
-        "reuters_commodities": "https://feeds.reuters.com/reuters/commoditiesNews",
+        "marketwatch_commodities": "https://www.marketwatch.com/rss/topstories/commodities"
     },
     "global_feeds": {
         "reuters": "https://feeds.reuters.com/reuters/topNews",
         "bbc": "http://feeds.bbci.co.uk/news/world/rss.xml",
         "aljazeera": "https://www.aljazeera.com/xml/rss/all.xml",
         "dawn": "https://www.dawn.com/feed",
+        "ap": "https://apnews.com/rss",
+        "reuters_world": "https://www.reuters.com/world",
+        "bbc_news": "https://www.bbc.com/news",
+        "cnn": "https://edition.cnn.com",
+        "gdelt_data": "http://data.gdeltproject.org/",
+        "gdelt_blog": "https://blog.gdeltproject.org/gdelt-2-0-our-global-knowledge-graph/",
+        "reliefweb": "https://reliefweb.int",
+        "reliefweb_topics": "https://reliefweb.int/updates?view=topics",
         "usgs_quakes_day": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_day.geojson",
+        "usgs_quakes_hour": "https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/all_hour.geojson",
+        "weather_alerts": "https://api.weather.gov/alerts",
+        "acled": "https://acleddata.com",
+        "ucdp": "https://ucdp.uu.se"
+    },
+    "jobs_feeds": {
+        "fred": "https://fred.stlouisfed.org",
+        "fred_icot": "https://fred.stlouisfed.org/graph/fredgraph.csv?id=ICSA",
+        "bls": "https://www.bls.gov",
+        "bls_dev": "https://www.bls.gov/developers/",
+        "doleta_unemploy": "https://oui.doleta.gov/unemploy",
+        "bea": "https://www.bea.gov/data",
+        "census_api": "https://api.census.gov/data.html",
+        "worldbank_gdppc": "https://api.worldbank.org/v2/country/all/indicator/NY.GDP.PCAP.CD?format=json",
+        "oecd": "https://data.oecd.org",
+        "imf": "https://www.imf.org/en/Data",
+        "ism": "https://www.ismworld.org",
+        "ism_report": "https://www.ismworld.org/ism-report-manufacturing/",
+        "ecb_rates_html": "https://www.ecb.europa.eu/stats/policy_and_exchange_rates/euro_reference_exchange_rates/html/index.en.html",
+        "ecb_hist": "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-hist.csv",
+        "frankfurter": "https://api.frankfurter.app/latest?from=USD&to=EUR",
+        "exchangerate_host": "https://api.exchangerate.host/latest?base=USD&symbols=EUR,GBP",
+        "bls_jlt": "https://www.bls.gov/jlt/",
+        "doleta_claims": "https://oui.doleta.gov/unemploy/claims.asp",
+        "news_google_ism": "https://news.google.com/search?q=ISM%20manufacturing",
+        "reuters_business": "https://feeds.reuters.com/reuters/businessNews",
+        "anadolu": "https://www.aa.com.tr/en/rss/default?cat=economy",
+        "economic_times": "https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms"
     }
 }
 
@@ -113,7 +176,6 @@ def parse_pub_date(pub_date_str):
     except Exception:
         return datetime.now(timezone.utc)
 
-
 def analyze_impact(title, description):
     impact = []
     text = (title + " " + description).lower()
@@ -121,7 +183,6 @@ def analyze_impact(title, description):
         if any(w in text for w in words):
             impact.append(k)
     return ", ".join(impact) if impact else "general"
-
 
 def analyze_sentiment(title, description):
     text = (title + " " + description).lower()
@@ -136,32 +197,10 @@ def analyze_sentiment(title, description):
     else:
         return "Neutral"
 
-
 def _fetch_feed(feed_name, url):
     try:
         r = requests.get(url, timeout=8, headers={"User-Agent": "Mozilla/5.0"})
         r.raise_for_status()
-        content_type = r.headers.get("Content-Type", "").lower()
-
-        # JSON feeds (USGS earthquakes, etc.)
-        if "json" in content_type or url.endswith(".json") or url.endswith(".geojson"):
-            data = r.json()
-            items = []
-            if "features" in data:  # USGS format
-                for f in data["features"]:
-                    props = f.get("properties", {})
-                    items.append({
-                        "feed": feed_name,
-                        "title": props.get("title", ""),
-                        "description": props.get("place", ""),
-                        "link": props.get("url", ""),
-                        "pub": datetime.fromtimestamp(props.get("time", 0) / 1000, tz=timezone.utc),
-                        "impact": "general",
-                        "sentiment": "Neutral",
-                    })
-            return items
-
-        # XML / RSS feeds
         root = ET.fromstring(r.content)
         items = []
         for item in root.findall(".//item"):
@@ -170,21 +209,21 @@ def _fetch_feed(feed_name, url):
             link = item.findtext("link", "").strip()
             pubRaw = item.findtext("pubDate")
             pub = parse_pub_date(pubRaw) if pubRaw else datetime.now(timezone.utc)
-            items.append({
-                "feed": feed_name,
-                "title": title,
-                "description": description,
-                "link": link,
-                "pub": pub,
-                "impact": analyze_impact(title, description),
-                "sentiment": analyze_sentiment(title, description),
-            })
+            items.append(
+                {
+                    "feed": feed_name,
+                    "title": title,
+                    "description": description,
+                    "link": link,
+                    "pub": pub,
+                    "impact": analyze_impact(title, description),
+                    "sentiment": analyze_sentiment(title, description),
+                }
+            )
         return items
-
     except Exception as e:
         logging.error(f"Failed to fetch {feed_name} ({url}): {e}")
         return []
-
 
 @st.cache_data(ttl=300, show_spinner=False)
 def fetch_feeds():
@@ -192,8 +231,8 @@ def fetch_feeds():
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {
             executor.submit(_fetch_feed, fname, url): (fname, url)
-            for category, feed_group in feeds.items()
-            for fname, url in feed_group.items()
+            for fname, urls in feeds.items()
+            for url in urls
         }
         for f in as_completed(futures):
             fname, url = futures[f]
@@ -206,7 +245,6 @@ def fetch_feeds():
                 logging.error(f"Error in future for {fname} ({url}): {e}")
     return all_data
 
-
 @st.cache_data(ttl=900, show_spinner=False)
 def fetch_volatility(ticker: str) -> pd.DataFrame:
     try:
@@ -214,7 +252,14 @@ def fetch_volatility(ticker: str) -> pd.DataFrame:
         if raw is None or raw.empty:
             return pd.DataFrame()
 
-        price_series = raw["Close"] if "Close" in raw.columns else raw.iloc[:, 0]
+        if isinstance(raw.columns, pd.MultiIndex):
+            if "Close" in raw.columns.levels[0]:
+                price_series = raw["Close"].iloc[:, 0]
+            else:
+                price_series = raw.iloc[:, 0]
+        else:
+            price_series = raw["Close"] if "Close" in raw.columns else raw.iloc[:, 0]
+
         df = pd.DataFrame({"Close": price_series})
         df.index = pd.to_datetime(df.index)
         df = df.sort_index()
@@ -230,10 +275,9 @@ def fetch_volatility(ticker: str) -> pd.DataFrame:
         return pd.DataFrame()
 
 # --- Trader-friendly Interpretation with Styling ---
-def interpret_market(asset: str, df: pd.DataFrame) -> list[str]:
+def interpret_market(asset: str, latest_value: float) -> list[str]:
     notes = []
     if asset == "US 10Y Yield":
-        latest_value = df["Volatility"].iloc[-1]
         if latest_value < 0.02:
             notes = [
                 '<span class="note-bullish">🟢 Bullish Gold</span>',
@@ -248,9 +292,7 @@ def interpret_market(asset: str, df: pd.DataFrame) -> list[str]:
             ]
         else:
             notes = ['<span class="note-neutral">⚖️ Neutral across markets</span>']
-
     elif asset == "US Dollar Index":
-        latest_value = df["Close"].iloc[-1]
         if latest_value > 105:
             notes = [
                 '<span class="note-bearish">🔴 Bearish Gold</span>',
@@ -265,21 +307,18 @@ def interpret_market(asset: str, df: pd.DataFrame) -> list[str]:
             ]
         else:
             notes = ['<span class="note-neutral">⚖️ Range-bound impact</span>']
-
     elif asset == "Gold Futures":
-        trend_up = df["Close"].iloc[-1] > df["Close"].iloc[-2]
         notes = [
             '<span class="note-bullish">🟢 Rising Gold supports bulls</span>'
-            if trend_up else '<span class="note-bearish">🔴 Falling Gold pressures bulls</span>'
+            if latest_value > 0
+            else '<span class="note-bearish">🔴 Falling Gold pressures bulls</span>'
         ]
-
     elif asset == "S&P 500":
-        trend_up = df["Close"].iloc[-1] > df["Close"].iloc[-2]
         notes = [
             '<span class="note-bullish">🟢 Bullish Stocks = Risk-On, 🔴 Bearish Gold</span>'
-            if trend_up else '<span class="note-bearish">🔴 Bearish Stocks = Risk-Off, 🟢 Bullish Gold</span>'
+            if latest_value > 0
+            else '<span class="note-bearish">🔴 Bearish Stocks = Risk-Off, 🟢 Bullish Gold</span>'
         ]
-
     else:
         notes = ['<span class="note-neutral">ℹ️ No bias rules defined</span>']
     return notes
@@ -296,7 +335,7 @@ with col1:
     feed_data = fetch_feeds()
 
     all_news = []
-    for _, items in feed_data.items():
+    for category, items in feed_data.items():
         all_news.extend(items)
 
     dedup = {item["link"]: item for item in all_news if item.get("link")}
@@ -310,20 +349,16 @@ with col1:
     st.markdown("**⚡ Important News**")
     if important_news:
         for n in important_news[:10]:
-            safe_title = re.sub(r"<.*?>", "", n["title"], flags=re.DOTALL)
+            safe_title = re.sub(r"<.*?>", "", n["title"])
             st.markdown(f"🔹 **[{safe_title}]({n['link']})**")
             st.caption(f"{n['impact'].title()} | {n['sentiment']} | {n['pub'].strftime('%Y-%m-%d %H:%M %Z')}")
     else:
-        st.info("No important news detected, showing latest headlines.")
-        for n in all_news[:10]:
-            safe_title = re.sub(r"<.*?>", "", n["title"], flags=re.DOTALL)
-            st.markdown(f"▫️ **[{safe_title}]({n['link']})**")
-            st.caption(f"{n['impact'].title()} | {n['sentiment']} | {n['pub'].strftime('%Y-%m-%d %H:%M %Z')}")
+        st.info("No important news detected.")
 
     st.markdown("** Sentiment Heatmap**")
     if all_news:
         df_news = pd.DataFrame(all_news)
-        if not df_news.empty and {"impact", "sentiment"}.issubset(df_news.columns):
+        if not df_news.empty and "impact" in df_news and "sentiment" in df_news:
             impact_counts = df_news.groupby(["impact", "sentiment"]).size().reset_index(name="count")
             if not impact_counts.empty:
                 fig = px.density_heatmap(
@@ -337,15 +372,12 @@ with col1:
                 )
                 st.plotly_chart(fig, use_container_width=True)
             else:
-                st.info("No sentiment buckets to display.")
+                st.warning("No sentiment buckets to display.")
         else:
-            st.info("No sentiment data available.")
+            st.warning("No sentiment data available.")
     else:
-        st.info("No news data available.")
+        st.warning("No news data available.")
     st.markdown("</div>", unsafe_allow_html=True)
-
-    with st.expander("🔎 Debug: Raw Feeds"):
-        st.json(all_news[:5])
 
 # --- Volatility Terminal ---
 with col2:
@@ -358,11 +390,12 @@ with col2:
             with vol_cols[idx % 2]:
                 st.markdown(f"**{name}**")
                 try:
-                    fig = px.line(df_vol, x=df_vol.index, y="Volatility", template="plotly_dark", height=200)
-                    st.plotly_chart(fig, use_container_width=True)
+                    fig = px.line(df_vol, x=df_vol.index, y="Volatility", template="plotly_dark")
+                    st.plotly_chart(fig, use_container_width=True, height=200)
                     latest_vol = df_vol["Volatility"].iloc[-1]
                     st.metric("Current Vol", f"{latest_vol:.2%}")
-                    notes = interpret_market(name, df_vol)
+                    # 🔹 Trader-friendly styled interpretation
+                    notes = interpret_market(name, latest_vol)
                     for n in notes:
                         st.markdown(n, unsafe_allow_html=True)
                 except Exception as e:
@@ -372,3 +405,4 @@ with col2:
             st.warning(f"No volatility data for {name}")
         idx += 1
     st.markdown("</div>", unsafe_allow_html=True)
+
